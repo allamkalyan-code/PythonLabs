@@ -1,0 +1,79 @@
+# Maaya – Session Change Log (Antigravity, 2026-03-20)
+
+## What was done
+
+### 1. App Start-up
+- Started the **FastAPI backend** with `uv run python -m server.main` (port 8000, hot-reload via uvicorn watchfiles).
+- Started the **Vite dev server** (`npm run dev`) in `maaya/frontend/` (port 5173).
+
+---
+
+### 2. Human-message duplication bug investigation & fix
+
+**Symptom:** Every time a user sent a message in the chat, it appeared twice in the UI.
+
+**Root causes found (3 separate issues):**
+
+#### A. Stale server process (Mar 19) intercepting requests
+A Python process started the previous day (Mar 19) was still listening on port 8000 and was intercepting all WebSocket connections *before* the current uvicorn-managed server. Since it was running old code, none of the in-session changes had any visible effect until it was killed.
+
+**Fix:** Identified via `Get-NetTCPConnection` → killed PID 9452 and PID 10588.
+
+---
+
+#### B. `server/routers/agent.py` — human messages leaking from backend
+`stream_mode="values"` in LangGraph's `astream` returns the **full state** (all messages) on every chunk. The first chunk always contains the `HumanMessage` the user just sent. The existing `_msg_to_dict` already returned `None` for `HumanMessage`, but an additional belt-and-suspenders guard was added.
+
+Also, using a hardcoded `thread_id = "maaya-main"` caused LangGraph to replay the **full conversation history** from the checkpointer on every new session — including old human messages.
+
+**Changes to [server/routers/agent.py](file:///d:/PythonLabs/deepagents/maaya/server/routers/agent.py):**
+
+```diff
++import uuid
+
+-     config={"configurable": {"thread_id": "maaya-main"}},
++     # Fresh thread per message — prevents LangGraph replaying old state
++     thread_id = f"maaya-{uuid.uuid4()}"
++     config={"configurable": {"thread_id": thread_id}},
+
+-     if serialized:
++     # Double guard: skip human messages (frontend adds these optimistically)
++     if serialized and serialized.get("type") != "human":
+```
+
+---
+
+#### C. `frontend/src/hooks/useWebSocket.ts` — React StrictMode double-mount
+React 18 **Strict Mode** intentionally mounts/unmounts/remounts every component in development. This caused `useEffect` to fire twice, creating **two WebSocket connections**. Both received server messages, doubling AI responses in the UI.
+
+**Changes to [frontend/src/hooks/useWebSocket.ts](file:///d:/PythonLabs/deepagents/maaya/frontend/src/hooks/useWebSocket.ts):**
+
+```diff
++   // Also guard against in-progress CONNECTING sockets (React StrictMode double-mount)
++   if (wsRef.current?.readyState === WebSocket.CONNECTING) return
+
+    return () => {
+-     wsRef.current?.close()
++     // Null the ref so the second StrictMode effect creates a fresh socket, not a duplicate
++     const ws = wsRef.current
++     if (ws) {
++       ws.close()
++       wsRef.current = null
++     }
+    }
+
+-   console.log('[DEBUG] addMessage called with:', msg)   // removed debug log
+```
+
+---
+
+## Files changed
+
+| File | Change |
+|------|--------|
+| [server/routers/agent.py](file:///d:/PythonLabs/deepagents/maaya/server/routers/agent.py) | Fresh `uuid` thread_id per message; explicit human-message guard before `send_text` |
+| [frontend/src/hooks/useWebSocket.ts](file:///d:/PythonLabs/deepagents/maaya/frontend/src/hooks/useWebSocket.ts) | CONNECTING guard + null-on-cleanup fix for React StrictMode; removed debug `console.log` |
+
+## Test files created (safe to delete)
+- `maaya/test_ws.py` — Python WebSocket smoke test
+- `maaya/test_agent.py` — agent astream inspection script

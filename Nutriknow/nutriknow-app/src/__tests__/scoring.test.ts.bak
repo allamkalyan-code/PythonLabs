@@ -1,0 +1,164 @@
+import { 
+  parseServingSizeToGrams, 
+  normalizePer100g, 
+  computeNutritionScore,
+  analyzeNutritionFacts 
+} from '../services/scoring';
+import { NutritionFacts } from '@/types/nutrition';
+
+describe('Nutrition Scoring Module', () => {
+  describe('parseServingSizeToGrams', () => {
+    test('parses simple gram values', () => {
+      expect(parseServingSizeToGrams('100g')).toBe(100);
+      expect(parseServingSizeToGrams('50 g')).toBe(50);
+      expect(parseServingSizeToGrams('75 grams')).toBe(75);
+    });
+
+    test('parses parenthetical gram values', () => {
+      expect(parseServingSizeToGrams('1 serving (50g)')).toBe(50);
+      expect(parseServingSizeToGrams('2 cups (240 g)')).toBe(240);
+    });
+
+    test('handles invalid inputs', () => {
+      expect(parseServingSizeToGrams('')).toBeNull();
+      expect(parseServingSizeToGrams('1 serving')).toBeNull();
+      expect(parseServingSizeToGrams('invalid')).toBeNull();
+    });
+  });
+
+  describe('normalizePer100g', () => {
+    const sampleData: NutritionFacts = {
+      servingSize: '50g',
+      servingsPerContainer: 2,
+      calories: 150,
+      totalFat: 8,
+      saturatedFat: 2,
+      transFat: 0,
+      cholesterol: 25,
+      sodium: 200,
+      totalCarbohydrates: 15,
+      dietaryFiber: 3,
+      sugars: 5,
+      addedSugars: 2,
+      protein: 10,
+      vitamins: { 'A': 10, 'C': 20 },
+      minerals: { 'Iron': 15, 'Calcium': 30 }
+    };
+
+    test('correctly normalizes to 100g', () => {
+      const normalized = normalizePer100g(sampleData);
+      
+      // Values should double (50g -> 100g)
+      expect(normalized.calories).toBe(300);
+      expect(normalized.totalFat).toBe(16);
+      expect(normalized.protein).toBe(20);
+      expect(normalized.vitamins.A).toBe(20);
+      expect(normalized.minerals.Iron).toBe(30);
+    });
+
+    test('returns original data if serving size cannot be parsed', () => {
+      const invalidServing = { ...sampleData, servingSize: 'invalid' };
+      const result = normalizePer100g(invalidServing);
+      expect(result).toEqual(invalidServing);
+    });
+  });
+
+  describe('computeNutritionScore', () => {
+    test('scores healthy food highly', () => {
+      const healthyFood: NutritionFacts = {
+        servingSize: '100g',
+        calories: 150,
+        totalFat: 3,
+        saturatedFat: 0.5,
+        transFat: 0,
+        cholesterol: 0,
+        sodium: 120,
+        totalCarbohydrates: 20,
+        dietaryFiber: 5,
+        sugars: 2,
+        addedSugars: 0,
+        protein: 12,
+        vitamins: {},
+        minerals: {}
+      };
+
+      const score = computeNutritionScore(healthyFood);
+      expect(score).toBeGreaterThan(80);
+    });
+
+    test('penalizes unhealthy attributes', () => {
+      const unhealthyFood: NutritionFacts = {
+        servingSize: '100g',
+        calories: 400,
+        totalFat: 20,
+        saturatedFat: 8,
+        transFat: 2,
+        cholesterol: 50,
+        sodium: 800,
+        totalCarbohydrates: 50,
+        dietaryFiber: 1,
+        sugars: 30,
+        addedSugars: 25,
+        protein: 5,
+        vitamins: {},
+        minerals: {}
+      };
+
+      const score = computeNutritionScore(unhealthyFood);
+      expect(score).toBeLessThan(50);
+    });
+  });
+
+  describe('analyzeNutritionFacts', () => {
+    test('generates appropriate insights', () => {
+      const food: NutritionFacts = {
+        servingSize: '100g',
+        calories: 300,
+        totalFat: 15,
+        saturatedFat: 8,
+        transFat: 0,
+        cholesterol: 0,
+        sodium: 120,
+        totalCarbohydrates: 20,
+        dietaryFiber: 2,
+        sugars: 15,
+        addedSugars: 12,
+        protein: 15,
+        vitamins: {},
+        minerals: {}
+      };
+
+      const analysis = analyzeNutritionFacts(food);
+      
+      expect(analysis.score).toBeDefined();
+      expect(analysis.insights).toBeInstanceOf(Array);
+      expect(analysis.insights.length).toBeGreaterThan(0);
+      
+      // Should note high saturated fat and added sugar
+      expect(analysis.insights.some(i => i.toLowerCase().includes('saturated fat'))).toBe(true);
+      expect(analysis.insights.some(i => i.toLowerCase().includes('added sugar'))).toBe(true);
+    });
+
+    test('handles allergen alerts', () => {
+      const food: NutritionFacts = {
+        servingSize: '100g',
+        calories: 200,
+        totalFat: 10,
+        saturatedFat: 2,
+        transFat: 0,
+        cholesterol: 0,
+        sodium: 120,
+        totalCarbohydrates: 20,
+        dietaryFiber: 2,
+        sugars: 5,
+        addedSugars: 0,
+        protein: 10,
+        vitamins: {},
+        minerals: {}
+      };
+
+      const analysis = analyzeNutritionFacts(food, ['peanuts', 'soy']);
+      expect(analysis.allergenAlerts).toBeInstanceOf(Array);
+    });
+  });
+});

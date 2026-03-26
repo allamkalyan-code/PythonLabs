@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_phase2.py -v)",
+      "Bash(cmd /c \"powershell -Command \"\"Get-Process | Where-Object {$_Name -like ''*python*'' -or $_Name -like ''*uvicorn*''} | Select-Object Id, Name, StartTime\"\"\")",
+      "Bash(cmd /c \"powershell -Command \"\"$conn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue; if \\($conn\\) { Get-Process -Id $conn.OwningProcess }\"\"\")",
+      "Bash(cmd /c \"powershell -Command \"\"Get-NetTCPConnection | Where-Object {$_LocalPort -eq 8000} | Format-List\"\"\")",
+      "Bash(uv run:*)",
+      "Bash(npm run:*)"
+    ]
+  }
+}
